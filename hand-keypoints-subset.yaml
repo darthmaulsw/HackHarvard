@@ -1,0 +1,20 @@
+# Hand Keypoint Dataset Subset Configuration
+# 3000 training images, 1000 validation images
+
+path: ./hand_keypoint_subset
+train: images/train
+val: images/val
+
+# Keypoints configuration
+kpt_shape: [21, 3]  # 21 keypoints, 3 values (x, y, visibility)
+
+# Keypoint names (MediaPipe hand landmarks)
+names:
+  0: hand
+
+# Keypoint connections for visualization (optional)
+# These define which keypoints are connected by lines
+skeleton: [[0,1], [1,2], [2,3], [3,4], [0,5], [5,6], [6,7], [7,8], [0,9], [9,10], [10,11], [11,12], [0,13], [13,14], [14,15], [15,16], [0,17], [17,18], [18,19], [19,20]]
+
+# Training parameters
+nc: 1  # number of classes
