@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import SignUp from './pages/SignUp'
 import VerifyCode from './pages/VerifyCode'
 import Dashboard from './pages/Dashboard'
+import RegisterPalm from './pages/RegisterPalm'
 
 function App() {
   return (
@@ -18,6 +19,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/registerpalm" 
+            element={
+              <ProtectedRoute>
+                <RegisterPalm />
               </ProtectedRoute>
             } 
           />

@@ -1,13 +1,19 @@
 import React from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, User, Phone, Calendar, Shield } from 'lucide-react'
+import { LogOut, User, Phone, Calendar, Shield, Hand } from 'lucide-react'
 import OTPDialogDemo from '../components/OTPDialogDemo'
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate()
   const { user, logout } = useAuth()
 
   const handleLogout = () => {
     logout()
+  }
+
+  const handleRegisterPalm = () => {
+    navigate('/registerpalm')
   }
 
   return (
@@ -93,7 +99,11 @@ const Dashboard: React.FC = () => {
             </p>
             
             <div className="space-y-4">
-              <button className="btn btn-primary w-full">
+              <button 
+                onClick={handleRegisterPalm}
+                className="btn btn-primary w-full flex items-center justify-center gap-2"
+              >
+                <Hand className="w-4 h-4" />
                 Register New Palm
               </button>
               <button className="btn btn-secondary w-full">
