@@ -72,6 +72,7 @@
                 <circle id="t2" cx="123" cy="238" r="12"/>  <!-- middle -->
                 <circle id="t3" cx="123" cy="238" r="12"/>  <!-- ring -->
                 <circle id="t4" cx="123" cy="238" r="12"/>  <!-- pinky -->
+                <circle id="t5" cx="123" cy="238" r="14"/>  <!-- palm -->
             </g>
 
           <!-- outline -->
@@ -106,18 +107,19 @@
     const overlaySpace = document.getElementById('flip-left'); // the flipped <g>
 
 
-    const tipIds = [4,8,12,16,20]; // thumb -> pinky
+    const tipIds = [4,8,12,16,20,0]; // thumb -> pinky
     const targetEls = [
       document.getElementById('t0'),
       document.getElementById('t1'),
       document.getElementById('t2'),
       document.getElementById('t3'),
-      document.getElementById('t4')
+      document.getElementById('t4'),
+      document.getElementById('t5')
     ];
 
     // --- helpers ---
     
-    function ensureDebugDots(n=5){
+    function ensureDebugDots(n=6){
       const g = document.getElementById('debug-dots');
       while(g.childElementCount<n){
         const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
@@ -150,7 +152,7 @@ function lmToScreenXY(lm){
 
     function drawLiveTipDots(landmarks){
       const lm = landmarks[0]; if(!lm) return;
-      const dots = ensureDebugDots(5);
+      const dots = ensureDebugDots(6);
       for(let i=0;i<tipIds.length;i++){
         const tip = lm[tipIds[i]]; if(!tip) continue;
         const sp = lmToScreenXY(tip);
@@ -179,14 +181,14 @@ function lmToScreenXY(lm){
 
     // helper: are *all* tips close enough?
     function allTipsClose(landmarks){
-    const dists = tipDistancesPX(landmarks);
-    if (dists.length < 5) return false;               // need all five tips
+      const dists = tipDistancesPX(landmarks);
+      if (dists.length < 6) return false;               // need all five tips
 
-    // threshold ~3.5% of the smallest camera dimension (tweak to taste)
-    const box = cameraBox.getBoundingClientRect();
-    const threshold = Math.min(box.width, box.height) * MATCH_FRACTION;
+      // threshold ~3.5% of the smallest camera dimension (tweak to taste)
+      const box = cameraBox.getBoundingClientRect();
+      const threshold = Math.min(box.width, box.height) * MATCH_FRACTION;
 
-    return dists.every(d => d <= threshold);
+      return dists.every(d => d <= threshold);
     }
 
     function installHands(){
@@ -370,6 +372,14 @@ function positionTargetsOnOutline() {
       targetEls[i].setAttribute('cx', p.x);
       targetEls[i].setAttribute('cy', p.y + dy);
     }
+    // --- PALM TARGET (t5) ---
+    // Put the palm dot low in the silhouette, centered under the middle finger tip.
+    const middle = targetEls[2]; // t2 == middle finger
+    const midX = Number(middle.getAttribute('cx')) || (box.x + box.width * 0.5);
+    const palmY = box.y + box.height * 0.63; // 0.80–0.92; raise/lower to taste
+    targetEls[5].setAttribute('cx', midX);
+    targetEls[5].setAttribute('cy', palmY);
+
   }
 
     // Call once everything exists
