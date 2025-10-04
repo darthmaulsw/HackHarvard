@@ -32,14 +32,74 @@ const RegisterPalm: React.FC = () => {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [status, setStatus] = useState('📷 Camera ready - match the green outline');
   const [statusType, setStatusType] = useState<'ready' | 'error' | 'default'>('ready');
-  const [hands, setHands] = useState<any>(null);
-  const [rafId, setRafId] = useState<number | null>(null);
+  const handsRef = useRef<any>(null);
+  const rafRef = useRef<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState<string>('');
+  const [isCountingDown, setIsCountingDown] = useState(false);
+  const [isDone, setIsDone] = useState(false);
+  const isCountingDownRef = useRef(false);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const captureImageRef = useRef<(() => void) | null>(null);
+  const isDoneRef = useRef(false);
 
   const tipIds = [4, 8, 12, 16, 20, 0]; // thumb -> pinky + palm
   const MATCH_FRACTION = 0.10;
+
+  // Sync refs with state
+  useEffect(() => {
+    isCountingDownRef.current = isCountingDown;
+  }, [isCountingDown]);
+
+  useEffect(() => {
+    isDoneRef.current = isDone;
+  }, [isDone]);
+
+  // Start countdown when hand is properly positioned
+  const startCountdown = useCallback(() => {
+    if (isCountingDownRef.current || isDoneRef.current) return; // already running or done
+    
+    console.log('⏰ Starting 2-second countdown...');
+    setIsCountingDown(true);
+    isCountingDownRef.current = true;
+    setCountdown(2);
+    setStatus('⏰ Capturing in 2 seconds...');
+    setStatusType('default');
+    
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(interval);
+          setIsCountingDown(false);
+          isCountingDownRef.current = false;
+          setCountdown(null);
+          console.log('📸 Countdown finished - capturing image!');
+          if (captureImageRef.current) {
+            captureImageRef.current(); // ✅ TAKE PHOTO HERE
+          }
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    countdownRef.current = interval;
+  }, []);
+
+  // Stop countdown when hand moves away
+  const stopCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    if (isCountingDownRef.current) {
+      console.log('🛑 Stopping countdown - hand moved away');
+      isCountingDownRef.current = false;
+      setIsCountingDown(false);
+      setCountdown(null);
+      setStatus('📷 Camera ready - match the green outline');
+      setStatusType('ready');
+    }
+  }, []);
 
   // Initialize MediaPipe Hands
   const initializeHands = useCallback(() => {
@@ -54,40 +114,48 @@ const RegisterPalm: React.FC = () => {
       
       console.log('⚙️ Setting Hands options...');
       handsInstance.setOptions({
-        selfieMode: true,
+        selfieMode: false,
         maxNumHands: 1,
         modelComplexity: 1,
         minDetectionConfidence: 0.6,
         minTrackingConfidence: 0.6
       });
 
+      handsRef.current = handsInstance;
+
       handsInstance.onResults((results: HandResults) => {
+        // Stop processing if we're done - check this FIRST
+        if (isDoneRef.current) return;
+        
         if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
           palmOutlineRef.current?.classList.remove('good');
           cameraContainerRef.current?.classList.remove('good');
-          setCountdown(null); // Reset countdown if no hand detected
           return;
         }
 
+        // Draw live fingertip dots
         drawLiveTipDots(results.multiHandLandmarks);
         
         if (allTipsClose(results.multiHandLandmarks)) {
           palmOutlineRef.current?.classList.add('good');
           cameraContainerRef.current?.classList.add('good');
           
-          // Start countdown if hand is properly positioned and not already counting/capturing
-          if (countdown === null && !isCapturing) {
+          // Start countdown if not already counting AND not done
+          if (!isCountingDownRef.current && !isDoneRef.current) {
             startCountdown();
           }
         } else {
           palmOutlineRef.current?.classList.remove('good');
           cameraContainerRef.current?.classList.remove('good');
-          setCountdown(null); // Reset countdown if hand not properly positioned
+          
+          // Stop countdown if hand moves away
+          if (isCountingDownRef.current) {
+            stopCountdown();
+          }
         }
       });
 
       console.log('✅ Hands instance created and configured');
-      setHands(handsInstance);
     } else {
       console.error('❌ MediaPipe Hands not available');
     }
@@ -122,7 +190,8 @@ const RegisterPalm: React.FC = () => {
   // Convert landmark to screen coordinates
   const lmToScreenXY = useCallback((lm: Landmark) => {
     const box = getVideoContentRect();
-    return { x: box.x + lm.x * box.width, y: box.y + lm.y * box.height };
+    const xNorm = 1 - lm.x;
+    return { x: box.x + xNorm * box.width, y: box.y + lm.y * box.height };
   }, [getVideoContentRect]);
 
   // Convert screen coordinates to SVG coordinates
@@ -209,115 +278,6 @@ const RegisterPalm: React.FC = () => {
     const threshold = Math.min(box.width, box.height) * MATCH_FRACTION;
     return dists.every(d => d <= threshold);
   }, [tipDistancesPX]);
-
-  // Start countdown when hand is detected
-  const startCountdown = useCallback(() => {
-    if (countdown !== null || isCapturing) return; // Already counting down or capturing
-    
-    console.log('⏰ Starting 2-second countdown...');
-    setCountdown(2);
-    setStatus('⏰ Hand detected! Capturing in 2 seconds...');
-    setStatusType('ready');
-    
-    const timer = setInterval(() => {
-      setCountdown(prev => {
-        if (prev === null || prev <= 1) {
-          clearInterval(timer);
-          // Auto-capture after countdown
-          setTimeout(() => {
-            autoCaptureImage();
-          }, 100);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [countdown, isCapturing]);
-
-  // Auto-capture image and send to server
-  const autoCaptureImage = useCallback(async () => {
-    if (!stream || !videoRef.current || isCapturing) {
-      console.log('❌ Cannot capture - missing stream, video, or already capturing');
-      return;
-    }
-
-    console.log('📸 Auto-capturing image...');
-    setIsCapturing(true);
-    setStatus('📸 Capturing palm image...');
-    setStatusType('default');
-
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      console.error('❌ Canvas not available');
-      setIsCapturing(false);
-      return;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.error('❌ Canvas context not available');
-      setIsCapturing(false);
-      return;
-    }
-
-    // Capture the image
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    
-    // Flip horizontally to match the mirrored video
-    ctx.scale(-1, 1);
-    ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
-    
-    try {
-      // Convert canvas to blob
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Failed to create blob'));
-        }, 'image/jpeg', 0.9);
-      });
-
-      // Send to Python server
-      await sendImageToServer(blob);
-      
-      setStatus('✅ Palm captured and registered successfully!');
-      setStatusType('ready');
-      
-    } catch (error) {
-      console.error('❌ Error capturing image:', error);
-      setStatus('❌ Failed to capture palm image');
-      setStatusType('error');
-    } finally {
-      setIsCapturing(false);
-    }
-  }, [stream, isCapturing]);
-
-  // Send image to Python server
-  const sendImageToServer = useCallback(async (imageBlob: Blob) => {
-    if (!phoneNumber) {
-      throw new Error('Phone number not available');
-    }
-
-    console.log('📤 Sending image to Python server...');
-    
-    const formData = new FormData();
-    formData.append('image', imageBlob, 'palm_image.jpg');
-    formData.append('phone_number', phoneNumber);
-
-    const response = await fetch('http://localhost:5000/register_palm', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Server error: ${response.status} - ${errorText}`);
-    }
-
-    const result = await response.json();
-    console.log('✅ Server response:', result);
-    return result;
-  }, [phoneNumber]);
 
   // Start camera
   const startCamera = useCallback(async () => {
@@ -430,42 +390,37 @@ const RegisterPalm: React.FC = () => {
 
   // Start highlight loop
   const startHighlightLoop = useCallback(() => {
-    console.log('🔄 Starting highlight loop...', { hands: !!hands, video: !!videoRef.current });
-    if (!hands || !videoRef.current) {
+    console.log('🔄 Starting highlight loop...', { hands: !!handsRef.current, video: !!videoRef.current });
+    if (!handsRef.current || !videoRef.current) {
       console.error('❌ Cannot start highlight loop - missing hands or video');
       return;
     }
     
     const tick = async () => {
-      if (videoRef.current) {
+      const h = handsRef.current
+      const v = videoRef.current
+      if (h && v) {
         try {
-          await hands.send({ image: videoRef.current });
+          await h.send({ image: v });
         } catch (error) {
           console.error('❌ Error sending frame to MediaPipe:', error);
         }
       }
-      const newRafId = requestAnimationFrame(tick);
-      setRafId(newRafId);
+      rafRef.current = requestAnimationFrame(tick);
     };
-    
-    if (rafId) {
-      console.log('🛑 Cancelling existing animation frame');
-      cancelAnimationFrame(rafId);
-    }
-    const newRafId = requestAnimationFrame(tick);
-    setRafId(newRafId);
-    console.log('✅ Highlight loop started with RAF ID:', newRafId);
-  }, [hands, rafId]);
+  if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  rafRef.current = requestAnimationFrame(tick);
+}, []);
 
   // Stop highlight loop
   const stopHighlightLoop = useCallback(() => {
-    console.log('🛑 Stopping highlight loop...', { rafId });
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      setRafId(null);
+    console.log('🛑 Stopping highlight loop...', { raf: !!rafRef.current });
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
       console.log('✅ Highlight loop stopped');
     }
-  }, [rafId]);
+  }, []);
 
   // Capture image
   const captureImage = useCallback(() => {
@@ -501,9 +456,19 @@ const RegisterPalm: React.FC = () => {
         
         setStatus('✅ Captured');
         setStatusType('ready');
+        
+        // Set done state and stop processing
+        setIsDone(true);
+        stopCamera();
+        console.log('🎉 Image captured successfully - stopping video processing');
       }
     }, 'image/jpeg', 0.9);
   }, [stream]);
+
+  // Set the ref for the capture function
+  useEffect(() => {
+    captureImageRef.current = captureImage;
+  }, [captureImage]);
 
   // Position targets on outline
   const positionTargetsOnOutline = useCallback(() => {
@@ -616,6 +581,11 @@ const RegisterPalm: React.FC = () => {
     startCamera();
     return () => {
       console.log('🧹 Component unmounting, stopping camera...');
+      // Clean up countdown timer
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
       stopCamera();
     };
   }, []); // Empty dependency array to run only on mount/unmount
@@ -648,42 +618,25 @@ const RegisterPalm: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-4xl mx-auto">
-         {/* Header */}
-         <div className="flex items-center justify-between mb-6">
-           <button
-             onClick={() => navigate('/dashboard')}
-             className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-           >
-             <ArrowLeft className="w-4 h-4" />
-             Back to Dashboard
-           </button>
-           <h1 className="text-2xl font-bold">Register New Palm</h1>
-         </div>
-
-         {/* Phone Number Input */}
-         <div className="mb-6 p-4 bg-gray-800 rounded-lg">
-           <label htmlFor="phone" className="block text-sm font-medium text-gray-300 mb-2">
-             Phone Number (for palm registration)
-           </label>
-           <input
-             id="phone"
-             type="tel"
-             value={phoneNumber}
-             onChange={(e) => setPhoneNumber(e.target.value)}
-             placeholder="Enter your phone number"
-             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
-             disabled={isCapturing}
-           />
-           <p className="text-xs text-gray-400 mt-1">
-             This will be used as your unique palm ID
-           </p>
-         </div>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Dashboard
+          </button>
+          <h1 className="text-2xl font-bold">Register New Palm</h1>
+        </div>
 
         {/* Camera Container */}
         <div className="relative w-full max-w-3xl mx-auto">
           <div 
             ref={cameraContainerRef}
-            className="relative w-full aspect-video rounded-xl overflow-hidden bg-black"
+            className={`relative w-full aspect-video rounded-xl overflow-hidden bg-black transition-all duration-300 ${
+              isCountingDown ? 'brightness-50' : ''
+            }`}
           >
             <video
               ref={videoRef}
@@ -692,6 +645,28 @@ const RegisterPalm: React.FC = () => {
               playsInline
               className="absolute inset-0 w-full h-full object-contain scale-x-[-1]"
             />
+
+            {/* Countdown Overlay */}
+            {isCountingDown && countdown && (
+              <div className="absolute inset-0 flex items-center justify-center z-20">
+                <div className="bg-black/80 rounded-full w-32 h-32 flex items-center justify-center">
+                  <div className="text-white text-6xl font-bold animate-pulse">
+                    {countdown}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Done Overlay */}
+            {isDone && (
+              <div className="absolute inset-0 flex items-center justify-center z-20">
+                <div className="bg-green-600/90 rounded-full w-40 h-40 flex items-center justify-center">
+                  <div className="text-white text-4xl font-bold">
+                    Done!
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Hand Guide Overlay */}
             <div className="absolute inset-0 pointer-events-none z-10">
@@ -747,22 +722,15 @@ const RegisterPalm: React.FC = () => {
              statusType === 'error' ? 'bg-red-900/20 border border-red-500 text-red-400' :
              'bg-gray-800 border border-gray-600 text-gray-300'
            }`}>
-             {countdown !== null ? (
-               <div className="text-center">
-                 <div className="text-4xl font-bold text-yellow-400 mb-2">{countdown}</div>
-                 <div>Capturing in {countdown} second{countdown !== 1 ? 's' : ''}...</div>
-               </div>
-             ) : (
-               status
-             )}
+             {status}
            </div>
 
            {/* Debug Info */}
            <div className="mt-2 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
-             <div>Debug: Camera Active: {isCameraActive ? '✅' : '❌'} | Stream: {stream ? '✅' : '❌'} | Hands: {hands ? '✅' : '❌'} | RAF: {rafId ? '✅' : '❌'}</div>
+             <div>Debug: Camera Active: {isCameraActive ? '✅' : '❌'} | Stream: {stream ? '✅' : '❌'} | Hands: {handsRef.current ? '✅' : '❌'} | RAF: {rafRef.current ? '✅' : '❌'}</div>
              <div>Video: {videoRef.current ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : 'Not loaded'}</div>
              <div>MediaPipe: {typeof window !== 'undefined' && window.Hands ? '✅ Available' : '❌ Not loaded'}</div>
-             <div>Countdown: {countdown !== null ? `⏰ ${countdown}s` : '❌'} | Capturing: {isCapturing ? '📸' : '❌'} | Phone: {phoneNumber ? '✅' : '❌'}</div>
+             <div>Countdown: {isCountingDown ? `⏰ ${countdown}s` : '❌'} | Outline: {palmOutlineRef.current?.classList.contains('good') ? '✨ Glowing' : '❌'} | Done: {isDone ? '✅' : '❌'}</div>
            </div>
 
           {/* Controls */}
@@ -796,22 +764,59 @@ const RegisterPalm: React.FC = () => {
               <CameraOff className="w-4 h-4" />
               Stop
             </button>
+            
+            {isDone && (
+              <button
+                onClick={() => {
+                  console.log('🔄 Resetting for new capture...');
+                  setIsDone(false);
+                  isDoneRef.current = false;
+                  setStatus('📷 Camera ready - match the green outline');
+                  setStatusType('ready');
+                  // Clear any existing countdown
+                  if (countdownRef.current) {
+                    clearInterval(countdownRef.current);
+                    countdownRef.current = null;
+                  }
+                  isCountingDownRef.current = false;
+                  setIsCountingDown(false);
+                  setCountdown(null);
+                }}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-full transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Capture Again
+              </button>
+            )}
           </div>
         </div>
 
         {/* Hidden canvas for image capture */}
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Instructions */}
-        <div className="mt-8 p-6 bg-gray-800 rounded-lg">
-          <h3 className="text-lg font-semibold mb-3">Instructions:</h3>
-          <ol className="list-decimal list-inside space-y-2 text-gray-300">
-            <li>Position your hand so that your fingertips align with the green outline</li>
-            <li>Wait for the outline to turn cyan - this means your hand is properly positioned</li>
-            <li>Click "Capture" to take a photo of your palm</li>
-            <li>The image will be automatically downloaded</li>
-          </ol>
-        </div>
+         {/* Instructions */}
+         <div className="mt-8 p-6 bg-gray-800 rounded-lg">
+           <h3 className="text-lg font-semibold mb-3">Instructions:</h3>
+           <ol className="list-decimal list-inside space-y-2 text-gray-300">
+             <li>Position your hand so that your fingertips align with the green outline</li>
+             <li>Wait for the outline to turn cyan (glowing) - this means your hand is properly positioned</li>
+             <li>When positioned correctly, a 2-second countdown will start automatically</li>
+             <li>The background will darken and show a countdown timer</li>
+             <li>The image will be captured automatically when the countdown reaches 0</li>
+             <li>The captured image will be downloaded to your device</li>
+           </ol>
+           
+           <div className="mt-4 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
+             <h4 className="text-green-400 font-semibold mb-2">Auto-Capture Features:</h4>
+             <ul className="text-green-300 text-sm space-y-1">
+               <li>• Hand detection triggers automatic countdown</li>
+               <li>• 2-second timer gives you time to position perfectly</li>
+               <li>• Background darkens during countdown for better focus</li>
+               <li>• Countdown stops if you move your hand away</li>
+               <li>• Manual "Capture" button still available as backup</li>
+             </ul>
+           </div>
+         </div>
       </div>
 
        <style>{`
