@@ -22,16 +22,13 @@
     .palm-outline{fill:none;stroke:rgba(0,255,0,.8);stroke-width:3;stroke-dasharray:8 4;filter:url(#glow);transition:stroke .12s ease, stroke-width .12s ease, filter .12s ease}
 .palm-outline.good{
   stroke:#00fff2;
-  stroke-width:10;                 /* thicker */
+  stroke-width:5;                 /* thicker */
   stroke-dasharray:none;
   stroke-linecap:round;
   stroke-linejoin:round;
   /* big stacked glow */
-  filter:
-    drop-shadow(0 0 2px  #00fff2)
-    drop-shadow(0 0 12px #00fff2)
-    drop-shadow(0 0 28px #00fff2)
-    drop-shadow(0 0 48px #00fff2);
+  filter: drop-shadow(0 0 6px rgba(0,255,242,.35));
+
 }
 
 /* dim the video when “good” for extra contrast */
@@ -170,7 +167,7 @@ function lmToScreenXY(lm){
     }
     return dists;
     }
-    const MATCH_FRACTION = 0.15; // tighten/loosen here
+    const MATCH_FRACTION = 0.10; // tighten/loosen here
 
     // helper: are *all* tips close enough?
     function allTipsClose(landmarks){
