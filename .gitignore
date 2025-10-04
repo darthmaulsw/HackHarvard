@@ -1,0 +1,4 @@
+./hand_keypoint_subset
+./hand_keypoint_dataset_26k
+./node_modules
+./venv
