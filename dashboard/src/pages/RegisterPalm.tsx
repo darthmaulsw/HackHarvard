@@ -34,6 +34,9 @@ const RegisterPalm: React.FC = () => {
   const [statusType, setStatusType] = useState<'ready' | 'error' | 'default'>('ready');
   const [hands, setHands] = useState<any>(null);
   const [rafId, setRafId] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState<string>('');
 
   const tipIds = [4, 8, 12, 16, 20, 0]; // thumb -> pinky + palm
   const MATCH_FRACTION = 0.10;
@@ -62,18 +65,25 @@ const RegisterPalm: React.FC = () => {
         if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
           palmOutlineRef.current?.classList.remove('good');
           cameraContainerRef.current?.classList.remove('good');
+          setCountdown(null); // Reset countdown if no hand detected
           return;
         }
 
-        // We'll implement these functions later to avoid dependency issues
-        // drawLiveTipDots(results.multiHandLandmarks);
-        // if (allTipsClose(results.multiHandLandmarks)) {
-        //   palmOutlineRef.current?.classList.add('good');
-        //   cameraContainerRef.current?.classList.add('good');
-        // } else {
-        //   palmOutlineRef.current?.classList.remove('good');
-        //   cameraContainerRef.current?.classList.remove('good');
-        // }
+        drawLiveTipDots(results.multiHandLandmarks);
+        
+        if (allTipsClose(results.multiHandLandmarks)) {
+          palmOutlineRef.current?.classList.add('good');
+          cameraContainerRef.current?.classList.add('good');
+          
+          // Start countdown if hand is properly positioned and not already counting/capturing
+          if (countdown === null && !isCapturing) {
+            startCountdown();
+          }
+        } else {
+          palmOutlineRef.current?.classList.remove('good');
+          cameraContainerRef.current?.classList.remove('good');
+          setCountdown(null); // Reset countdown if hand not properly positioned
+        }
       });
 
       console.log('✅ Hands instance created and configured');
@@ -199,6 +209,115 @@ const RegisterPalm: React.FC = () => {
     const threshold = Math.min(box.width, box.height) * MATCH_FRACTION;
     return dists.every(d => d <= threshold);
   }, [tipDistancesPX]);
+
+  // Start countdown when hand is detected
+  const startCountdown = useCallback(() => {
+    if (countdown !== null || isCapturing) return; // Already counting down or capturing
+    
+    console.log('⏰ Starting 2-second countdown...');
+    setCountdown(2);
+    setStatus('⏰ Hand detected! Capturing in 2 seconds...');
+    setStatusType('ready');
+    
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timer);
+          // Auto-capture after countdown
+          setTimeout(() => {
+            autoCaptureImage();
+          }, 100);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [countdown, isCapturing]);
+
+  // Auto-capture image and send to server
+  const autoCaptureImage = useCallback(async () => {
+    if (!stream || !videoRef.current || isCapturing) {
+      console.log('❌ Cannot capture - missing stream, video, or already capturing');
+      return;
+    }
+
+    console.log('📸 Auto-capturing image...');
+    setIsCapturing(true);
+    setStatus('📸 Capturing palm image...');
+    setStatusType('default');
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      console.error('❌ Canvas not available');
+      setIsCapturing(false);
+      return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.error('❌ Canvas context not available');
+      setIsCapturing(false);
+      return;
+    }
+
+    // Capture the image
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    
+    // Flip horizontally to match the mirrored video
+    ctx.scale(-1, 1);
+    ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
+    
+    try {
+      // Convert canvas to blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to create blob'));
+        }, 'image/jpeg', 0.9);
+      });
+
+      // Send to Python server
+      await sendImageToServer(blob);
+      
+      setStatus('✅ Palm captured and registered successfully!');
+      setStatusType('ready');
+      
+    } catch (error) {
+      console.error('❌ Error capturing image:', error);
+      setStatus('❌ Failed to capture palm image');
+      setStatusType('error');
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [stream, isCapturing]);
+
+  // Send image to Python server
+  const sendImageToServer = useCallback(async (imageBlob: Blob) => {
+    if (!phoneNumber) {
+      throw new Error('Phone number not available');
+    }
+
+    console.log('📤 Sending image to Python server...');
+    
+    const formData = new FormData();
+    formData.append('image', imageBlob, 'palm_image.jpg');
+    formData.append('phone_number', phoneNumber);
+
+    const response = await fetch('http://localhost:5000/register_palm', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Server response:', result);
+    return result;
+  }, [phoneNumber]);
 
   // Start camera
   const startCamera = useCallback(async () => {
@@ -529,17 +648,36 @@ const RegisterPalm: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold">Register New Palm</h1>
-        </div>
+         {/* Header */}
+         <div className="flex items-center justify-between mb-6">
+           <button
+             onClick={() => navigate('/dashboard')}
+             className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+           >
+             <ArrowLeft className="w-4 h-4" />
+             Back to Dashboard
+           </button>
+           <h1 className="text-2xl font-bold">Register New Palm</h1>
+         </div>
+
+         {/* Phone Number Input */}
+         <div className="mb-6 p-4 bg-gray-800 rounded-lg">
+           <label htmlFor="phone" className="block text-sm font-medium text-gray-300 mb-2">
+             Phone Number (for palm registration)
+           </label>
+           <input
+             id="phone"
+             type="tel"
+             value={phoneNumber}
+             onChange={(e) => setPhoneNumber(e.target.value)}
+             placeholder="Enter your phone number"
+             className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+             disabled={isCapturing}
+           />
+           <p className="text-xs text-gray-400 mt-1">
+             This will be used as your unique palm ID
+           </p>
+         </div>
 
         {/* Camera Container */}
         <div className="relative w-full max-w-3xl mx-auto">
@@ -609,7 +747,14 @@ const RegisterPalm: React.FC = () => {
              statusType === 'error' ? 'bg-red-900/20 border border-red-500 text-red-400' :
              'bg-gray-800 border border-gray-600 text-gray-300'
            }`}>
-             {status}
+             {countdown !== null ? (
+               <div className="text-center">
+                 <div className="text-4xl font-bold text-yellow-400 mb-2">{countdown}</div>
+                 <div>Capturing in {countdown} second{countdown !== 1 ? 's' : ''}...</div>
+               </div>
+             ) : (
+               status
+             )}
            </div>
 
            {/* Debug Info */}
@@ -617,6 +762,7 @@ const RegisterPalm: React.FC = () => {
              <div>Debug: Camera Active: {isCameraActive ? '✅' : '❌'} | Stream: {stream ? '✅' : '❌'} | Hands: {hands ? '✅' : '❌'} | RAF: {rafId ? '✅' : '❌'}</div>
              <div>Video: {videoRef.current ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : 'Not loaded'}</div>
              <div>MediaPipe: {typeof window !== 'undefined' && window.Hands ? '✅ Available' : '❌ Not loaded'}</div>
+             <div>Countdown: {countdown !== null ? `⏰ ${countdown}s` : '❌'} | Capturing: {isCapturing ? '📸' : '❌'} | Phone: {phoneNumber ? '✅' : '❌'}</div>
            </div>
 
           {/* Controls */}
