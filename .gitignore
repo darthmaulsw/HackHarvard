@@ -1,4 +1,7 @@
 ./hand_keypoint_subset
 ./hand_keypoint_dataset_26k
 ./node_modules
+./dashboard/node_modules
 ./venv
+# Dataset files
+hand_keypoint_dataset_26k/
