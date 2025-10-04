@@ -170,6 +170,7 @@ function lmToScreenXY(lm){
     }
     return dists;
     }
+    const MATCH_FRACTION = 0.15; // tighten/loosen here
 
     // helper: are *all* tips close enough?
     function allTipsClose(landmarks){
@@ -178,7 +179,7 @@ function lmToScreenXY(lm){
 
     // threshold ~3.5% of the smallest camera dimension (tweak to taste)
     const box = cameraBox.getBoundingClientRect();
-    const threshold = Math.min(box.width, box.height) * 0.035;
+    const threshold = Math.min(box.width, box.height) * MATCH_FRACTION;
 
     return dists.every(d => d <= threshold);
     }
@@ -360,7 +361,7 @@ function positionTargetsOnOutline() {
     // place target circles slightly down so they sit on the stroke visually
     const dy = 4;
     for (let i = 0; i < 5; i++) {
-      const p = picked[i] || { x: box.x, y: box.y }; // fallback
+      const p = picked[4-i] || { x: box.x, y: box.y }; // fallback
       targetEls[i].setAttribute('cx', p.x);
       targetEls[i].setAttribute('cy', p.y + dy);
     }
