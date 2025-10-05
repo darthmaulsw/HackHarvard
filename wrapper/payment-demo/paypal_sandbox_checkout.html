@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PayPal Sandbox Checkout - $10</title>
+    <script src="https://www.paypal.com/sdk/js?client-id=AdqPLeYaL9BbKBe4dg7JdW54VyGIpAvnJ7nFIMBvjFa517ZEQ1ZykPMwOkwbvZz4rxE3iwAGkdRlCSOx&currency=USD"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="palmAuthWrapper.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #0070ba 0%, #003087 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .invoice-details {
+            padding: 30px;
+        }
+
+        .invoice-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 0;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .invoice-item:last-child {
+            border-bottom: none;
+            font-weight: bold;
+            font-size: 18px;
+            color: #0070ba;
+        }
+
+        .item-name {
+            color: #333;
+        }
+
+        .item-price {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .total .item-price {
+            color: #0070ba;
+            font-weight: bold;
+        }
+
+        .payment-section {
+            padding: 0 30px 30px 30px;
+        }
+
+        #paypal-button-container {
+            margin-top: 20px;
+        }
+
+        .status-message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 500;
+            display: none;
+        }
+
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+
+        .sandbox-notice {
+            background: #fff3cd;
+            color: #856404;
+            padding: 12px;
+            text-align: center;
+            font-size: 13px;
+            border-bottom: 1px solid #ffeaa7;
+        }
+
+        .sandbox-notice strong {
+            font-weight: 600;
+        }
+
+        .order-id {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sandbox-notice">
+            <strong>🧪 SANDBOX MODE</strong> - Use a PayPal sandbox BUYER account (not the merchant account) to test this payment
+        </div>
+        
+        <div style="background: #e7f3ff; padding: 15px; border-bottom: 1px solid #b3d9ff;">
+            <details style="cursor: pointer;">
+                <summary style="font-weight: 600; color: #0070ba; margin-bottom: 10px;">Need a test buyer account? Click here</summary>
+                <div style="font-size: 13px; color: #333; line-height: 1.6;">
+                    <p style="margin-bottom: 8px;">1. Go to <a href="https://developer.paypal.com/dashboard/accounts" target="_blank" style="color: #0070ba;">developer.paypal.com/dashboard/accounts</a></p>
+                    <p style="margin-bottom: 8px;">2. Click "Create Account"</p>
+                    <p style="margin-bottom: 8px;">3. Select account type: <strong>Personal (Buyer Account)</strong></p>
+                    <p style="margin-bottom: 8px;">4. Fill in details and create the account</p>
+                    <p style="margin-bottom: 8px;">5. Use those credentials to log in when paying</p>
+                    <p style="margin-top: 12px; padding: 8px; background: #fff; border-left: 3px solid #0070ba;"><strong>Note:</strong> The test buyer account will have sandbox funds automatically.</p>
+                </div>
+            </details>
+        </div>
+        
+        <div class="header">
+            <h1>Invoice Payment</h1>
+            <p>Complete your secure payment with PayPal</p>
+        </div>
+
+        <div class="invoice-details">
+            <div class="invoice-item">
+                <span class="item-name">Service/Product</span>
+                <span class="item-price">$10.00</span>
+            </div>
+            <div class="invoice-item">
+                <span class="item-name">Tax</span>
+                <span class="item-price">$0.00</span>
+            </div>
+            <div class="invoice-item total">
+                <span class="item-name">Total Amount</span>
+                <span class="item-price">$10.00</span>
+            </div>
+        </div>
+
+        <div class="payment-section">
+            <div id="paypal-button-container"></div>
+            <div id="status-message" class="status-message"></div>
+        </div>
+    </div>
+
+    <script>
+        paypal.Buttons({
+            createOrder: function(data, actions) {
+                return actions.order.create({
+                    purchase_units: [{
+                        description: 'Invoice Payment',
+                        amount: {
+                            currency_code: 'USD',
+                            value: '10.00',
+                            breakdown: {
+                                item_total: {
+                                    currency_code: 'USD',
+                                    value: '10.00'
+                                }
+                            }
+                        },
+                        items: [{
+                            name: 'Service/Product',
+                            unit_amount: {
+                                currency_code: 'USD',
+                                value: '10.00'
+                            },
+                            quantity: '1'
+                        }]
+                    }]
+                });
+            },
+            onApprove: function(data, actions) {
+                return actions.order.capture().then(function(details) {
+                    const statusMsg = document.getElementById('status-message');
+                    statusMsg.className = 'status-message success';
+                    statusMsg.innerHTML = `
+                        <div>✓ Payment Successful!</div>
+                        <div class="order-id">Transaction ID: ${details.id}</div>
+                        <div class="order-id">Payer: ${details.payer.name.given_name} ${details.payer.name.surname}</div>
+                    `;
+                    
+                    console.log('Payment completed:', details);
+                });
+            },
+            onError: function(err) {
+                const statusMsg = document.getElementById('status-message');
+                statusMsg.className = 'status-message error';
+                statusMsg.innerHTML = '✗ Payment failed. Please try again.';
+                
+                console.error('Payment error:', err);
+            },
+            onCancel: function(data) {
+                const statusMsg = document.getElementById('status-message');
+                statusMsg.className = 'status-message error';
+                statusMsg.innerHTML = '✗ Payment cancelled.';
+                
+                console.log('Payment cancelled:', data);
+            }
+        }).render('#paypal-button-container');
+        
+        // Initialize Palm Auth Wrapper
+        // The wrapper will automatically lock the payment section
+        console.log('Palm Auth Wrapper initialized');
+        
+        // Wait for wrapper to be available
+        function waitForWrapper() {
+            if (window.palmAuthWrapper) {
+                console.log('Palm Auth Wrapper is ready');
+                return;
+            }
+            setTimeout(waitForWrapper, 100);
+        }
+        waitForWrapper();
+        
+        // Example: Listen for unlock events
+        document.addEventListener('palmAuthUnlocked', function(event) {
+            console.log('Payment section unlocked!', event.detail);
+            // You can add additional logic here when payment is unlocked
+        });
+        
+        // Example: How to integrate with your palm recognition system
+        // This would typically be called from your palm capture component
+        function handlePalmCapture(palmImageData) {
+            if (window.palmAuthWrapper) {
+                window.palmAuthWrapper.authenticateWithPalm(palmImageData)
+                    .then(result => {
+                        console.log('Palm authentication successful:', result);
+                    })
+                    .catch(error => {
+                        console.error('Palm authentication failed:', error);
+                    });
+            }
+        }
+        
+        // Example: Manual unlock for testing (remove in production)
+        // Uncomment the line below to test without palm authentication
+        // setTimeout(() => window.palmAuthWrapper?.forceUnlock(), 5000);
+    </script>
+</body>
+</html>

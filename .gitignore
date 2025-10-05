@@ -3,5 +3,8 @@
 ./node_modules
 ./dashboard/node_modules
 ./venv
+./env
 # Dataset files
 hand_keypoint_dataset_26k/
+# Palm data storage
+palm_data/
