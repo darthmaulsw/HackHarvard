@@ -1,0 +1,30 @@
+{
+  "phoneNumber": "1234567890",
+  "signature": "a5b94032ec08ee49",
+  "normalizedDistances": {
+    "index_knuckle_wrist": 1.0477125644683838,
+    "middle_knuckle_wrist": 1.0,
+    "ring_knuckle_wrist": 0.9233715534210205,
+    "pinky_knuckle_wrist": 0.8515706062316895,
+    "index_knuckle_middle_knuckle": 0.27779749035835266,
+    "index_knuckle_ring_knuckle": 0.5586696863174438,
+    "index_knuckle_pinky_knuckle": 0.862216055393219,
+    "middle_knuckle_ring_knuckle": 0.2907410264015198,
+    "middle_knuckle_pinky_knuckle": 0.6102148294448853,
+    "pinky_knuckle_ring_knuckle": 0.32554495334625244
+  },
+  "rawDistances": {
+    "index_knuckle_wrist": 238.3315887451172,
+    "middle_knuckle_wrist": 227.47802734375,
+    "ring_knuckle_wrist": 210.04673767089844,
+    "pinky_knuckle_wrist": 193.71360778808594,
+    "index_knuckle_middle_knuckle": 63.19282531738281,
+    "index_knuckle_ring_knuckle": 127.08507537841797,
+    "index_knuckle_pinky_knuckle": 196.1352081298828,
+    "middle_knuckle_ring_knuckle": 66.13719177246094,
+    "middle_knuckle_pinky_knuckle": 138.8104705810547,
+    "pinky_knuckle_ring_knuckle": 74.0543212890625
+  },
+  "registeredAt": "2025-10-05T07:02:06.105439",
+  "lastUsed": "2025-10-05T07:02:06.105439"
+}

@@ -6,6 +6,9 @@ const cors = require('cors');
 const twilio = require('twilio');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const multer = require('multer');
+const { spawn } = require('child_process');
+const fs = require('fs').promises;
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -13,6 +16,22 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: path.join(__dirname, '..', 'palm_data', 'temp_images'),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // Twilio configuration
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -29,6 +48,21 @@ if (!accountSid || !authToken || !serviceSid) {
 
 const client = twilio(accountSid, authToken);
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+// Test mode configuration
+const TEST_MODE = process.env.TEST_MODE === 'true' || process.env.NODE_ENV === 'development';
+const TEST_PHONE_NUMBERS = [
+  '5551234567',  // Test phone 1
+  '5559876543',  // Test phone 2
+  '5555555555',  // Test phone 3
+  '8123443735'   // Your test phone
+];
+
+console.log(`🔧 Server running in ${TEST_MODE ? 'TEST MODE' : 'PRODUCTION MODE'}`);
+if (TEST_MODE) {
+  console.log('📱 Test phone numbers:', TEST_PHONE_NUMBERS.join(', '));
+  console.log('🔑 Test verification code: 123456');
+}
 
 // In-memory storage (replace with database in production)
 const users = new Map();
@@ -69,6 +103,57 @@ const verifyToken = (req, res, next) => {
   }
 };
 
+// Helper function to call Python palm API
+const callPythonPalmAPI = (command, args = []) => {
+  return new Promise((resolve, reject) => {
+    console.log(`🐍 Calling Python API: ${command} ${args.join(' ')}`);
+    
+    const pythonPath = process.env.PYTHON_PATH || 'python';
+    const scriptPath = path.join(__dirname, '..', 'palm_api.py');
+    const pythonArgs = [scriptPath, command, ...args];
+    
+    console.log(`🐍 Python command: ${pythonPath} ${pythonArgs.join(' ')}`);
+    
+    const python = spawn(pythonPath, pythonArgs);
+    
+    let stdout = '';
+    let stderr = '';
+    
+    python.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    python.stderr.on('data', (data) => {
+      stderr += data.toString();
+      console.log(`🐍 Python stderr: ${data.toString()}`);
+    });
+    
+    python.on('close', (code) => {
+      console.log(`🐍 Python process exited with code ${code}`);
+      
+      if (code !== 0) {
+        console.error(`❌ Python error: ${stderr}`);
+        reject(new Error(`Python process failed with code ${code}`));
+        return;
+      }
+      
+      try {
+        const result = JSON.parse(stdout);
+        console.log(`✅ Python result:`, result);
+        resolve(result);
+      } catch (error) {
+        console.error(`❌ Failed to parse Python output: ${stdout}`);
+        reject(new Error('Failed to parse Python response'));
+      }
+    });
+    
+    python.on('error', (error) => {
+      console.error(`❌ Failed to start Python process:`, error);
+      reject(error);
+    });
+  });
+};
+
 // Routes
 
 // Send verification code
@@ -83,6 +168,25 @@ app.post('/api/auth/send-code', async (req, res) => {
       });
     }
 
+    // Test mode: Use mock verification
+    if (TEST_MODE) {
+      console.log(`🧪 TEST MODE: Mock SMS sent to ${phoneNumber}`);
+      
+      // Store pending verification with mock status
+      pendingVerifications.set(phoneNumber, {
+        phoneNumber,
+        status: 'pending',
+        createdAt: new Date(),
+        isTestMode: true
+      });
+
+      return res.json({
+        success: true,
+        message: `Test verification code sent to ${phoneNumber}. Use code: 123456`
+      });
+    }
+
+    // Production mode: Use real Twilio
     // Format phone number for Twilio (add +1 for US)
     const formattedPhone = `+1${phoneNumber}`;
 
@@ -115,6 +219,8 @@ app.post('/api/auth/send-code', async (req, res) => {
       message = 'Invalid phone number format';
     } else if (error.code === 60203) {
       message = 'Phone number is not reachable';
+    } else if (error.message.includes('Too many requests')) {
+      message = 'Rate limit exceeded. Please try again later or use test mode.';
     }
 
     res.status(500).json({
@@ -143,6 +249,47 @@ app.post('/api/auth/verify-code', async (req, res) => {
       });
     }
 
+    // Test mode: Accept any code for test phone numbers
+    if (TEST_MODE) {
+      const pendingVerification = pendingVerifications.get(phoneNumber);
+      
+      if (!pendingVerification) {
+        return res.status(400).json({
+          success: false,
+          message: 'No verification found for this phone number'
+        });
+      }
+
+      // In test mode, accept any 6-digit code
+      console.log(`🧪 TEST MODE: Verifying code ${code} for ${phoneNumber}`);
+      
+      // Create or update user
+      const userId = `user_${phoneNumber}_${Date.now()}`;
+      const user = {
+        id: userId,
+        phoneNumber,
+        isVerified: true,
+        createdAt: new Date().toISOString(),
+        isTestUser: true
+      };
+
+      users.set(phoneNumber, user);
+      pendingVerifications.delete(phoneNumber);
+
+      // Generate JWT token
+      const token = generateToken(user);
+
+      return res.json({
+        success: true,
+        message: 'Phone number verified successfully (Test Mode)',
+        data: {
+          user,
+          token
+        }
+      });
+    }
+
+    // Production mode: Use real Twilio verification
     const formattedPhone = `+1${phoneNumber}`;
 
     // Verify the code using Twilio Verify
@@ -232,6 +379,25 @@ app.post('/api/auth/resend-code', async (req, res) => {
       });
     }
 
+    // Test mode: Use mock resend
+    if (TEST_MODE) {
+      console.log(`🧪 TEST MODE: Mock resend SMS to ${phoneNumber}`);
+      
+      // Update pending verification with mock status
+      pendingVerifications.set(phoneNumber, {
+        phoneNumber,
+        status: 'pending',
+        createdAt: new Date(),
+        isTestMode: true
+      });
+
+      return res.json({
+        success: true,
+        message: `Test verification code resent to ${phoneNumber}. Use code: 123456`
+      });
+    }
+
+    // Production mode: Use real Twilio
     const formattedPhone = `+1${phoneNumber}`;
 
     // Send verification code using Twilio Verify
@@ -268,6 +434,225 @@ app.post('/api/auth/resend-code', async (req, res) => {
     res.status(500).json({
       success: false,
       message
+    });
+  }
+});
+
+// Palm Registration Endpoints
+
+// Register palm (no auth required for demo)
+app.post('/api/palm/register', upload.single('image'), async (req, res) => {
+  console.log('📱 Palm registration request received');
+  console.log('📎 File:', req.file);
+  console.log('📋 Body:', req.body);
+  
+  try {
+    const { phoneNumber } = req.body;
+    
+    if (!phoneNumber) {
+      console.error('❌ No phone number provided');
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number is required'
+      });
+    }
+    
+    if (!req.file) {
+      console.error('❌ No image file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: 'No image file uploaded'
+      });
+    }
+    
+    console.log(`📸 Processing palm registration for ${phoneNumber}`);
+    console.log(`📁 Image saved to: ${req.file.path}`);
+    
+    // Call Python API to register palm
+    const result = await callPythonPalmAPI('register', [req.file.path, phoneNumber]);
+    
+    // Clean up uploaded file
+    try {
+      await fs.unlink(req.file.path);
+      console.log(`🗑️  Cleaned up temporary file: ${req.file.path}`);
+    } catch (cleanupError) {
+      console.error(`⚠️  Failed to cleanup file: ${cleanupError.message}`);
+    }
+    
+    if (result.success) {
+      console.log(`✅ Palm registered successfully for ${phoneNumber}`);
+      res.json(result);
+    } else {
+      // Check if it's an "already registered" message
+      if (result.message && result.message.includes('already registered')) {
+        console.log(`ℹ️  Palm already registered for ${phoneNumber}`);
+        res.json(result); // Return 200 with success:false for already registered
+      } else {
+        console.error(`❌ Palm registration failed: ${result.message}`);
+        res.status(400).json(result);
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Palm registration error:', error);
+    
+    // Clean up file if it exists
+    if (req.file) {
+      try {
+        await fs.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.error(`⚠️  Failed to cleanup file: ${cleanupError.message}`);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: `Registration failed: ${error.message}`
+    });
+  }
+});
+
+// Recognize palm (no auth required for demo)
+app.post('/api/palm/recognize', upload.single('image'), async (req, res) => {
+  console.log('🔍 Palm recognition request received');
+  console.log('📎 File:', req.file);
+  console.log('📋 Body:', req.body);
+  
+  try {
+    const { phoneNumber } = req.body;
+    
+    if (!req.file) {
+      console.error('❌ No image file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: 'No image file uploaded'
+      });
+    }
+    
+    console.log(`🔍 Processing palm recognition for ${phoneNumber}`);
+    console.log(`📁 Image saved to: ${req.file.path}`);
+    
+    // Call Python API to recognize palm (match against specific phone number)
+    const threshold = req.body.threshold || '0.13';
+    const result = await callPythonPalmAPI('recognize', [req.file.path, phoneNumber, threshold]);
+    
+    // Clean up uploaded file
+    try {
+      await fs.unlink(req.file.path);
+      console.log(`🗑️  Cleaned up temporary file: ${req.file.path}`);
+    } catch (cleanupError) {
+      console.error(`⚠️  Failed to cleanup file: ${cleanupError.message}`);
+    }
+    
+    if (result.success) {
+      console.log(`✅ Palm recognition completed for ${phoneNumber}`);
+      res.json(result);
+    } else {
+      console.error(`❌ Palm recognition failed: ${result.message}`);
+      res.status(400).json(result);
+    }
+    
+  } catch (error) {
+    console.error('❌ Palm recognition error:', error);
+    
+    // Clean up file if it exists
+    if (req.file) {
+      try {
+        await fs.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.error(`⚠️  Failed to cleanup file: ${cleanupError.message}`);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: `Recognition failed: ${error.message}`
+    });
+  }
+});
+
+// Check palm registration status (no auth required for demo)
+app.get('/api/palm/status/:phoneNumber', async (req, res) => {
+  console.log('📊 Palm status check');
+  console.log('📋 Params:', req.params);
+  
+  try {
+    const { phoneNumber } = req.params;
+    const palmDataPath = path.join(__dirname, '..', 'palm_data', `${phoneNumber}.json`);
+    
+    try {
+      await fs.access(palmDataPath);
+      console.log(`✅ Palm registered for ${phoneNumber}`);
+      
+      // Read palm data to get registration details
+      const palmData = JSON.parse(await fs.readFile(palmDataPath, 'utf8'));
+      
+      res.json({
+        success: true,
+        registered: true,
+        data: {
+          phoneNumber: palmData.phoneNumber,
+          registeredAt: palmData.registeredAt,
+          lastUsed: palmData.lastUsed
+        }
+      });
+    } catch (accessError) {
+      console.log(`❌ No palm registered for ${phoneNumber}`);
+      res.json({
+        success: true,
+        registered: false
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Status check error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check palm status'
+    });
+  }
+});
+
+// Delete palm registration (no auth required for demo)
+app.delete('/api/palm/delete/:phoneNumber', async (req, res) => {
+  console.log('🗑️  Palm deletion request');
+  console.log('📋 Params:', req.params);
+  
+  try {
+    const { phoneNumber } = req.params;
+    
+    // Call Python API to delete palm
+    const result = await callPythonPalmAPI('delete', [phoneNumber]);
+    
+    if (result.success) {
+      console.log(`✅ Palm deleted for ${phoneNumber}`);
+      res.json(result);
+    } else {
+      console.error(`❌ Palm deletion failed: ${result.message}`);
+      res.status(400).json(result);
+    }
+    
+  } catch (error) {
+    console.error('❌ Palm deletion error:', error);
+    res.status(500).json({
+      success: false,
+      message: `Deletion failed: ${error.message}`
+    });
+  }
+});
+
+// List all registered palms (admin endpoint - optional)
+app.get('/api/palm/list', async (req, res) => {
+  console.log('📋 List all palms request');
+  
+  try {
+    const result = await callPythonPalmAPI('list', []);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ List palms error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list palms'
     });
   }
 });

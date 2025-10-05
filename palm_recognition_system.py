@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional
 import pickle
 import os
+import sys
 
 class PalmRecognitionSystem:
     """
@@ -51,14 +52,15 @@ class PalmRecognitionSystem:
         """Load the trained YOLO model"""
         try:
             if os.path.exists(self.model_path):
-                self.model = YOLO(self.model_path)
-                print(f"✅ Model loaded successfully from {self.model_path}")
+                # Load model with verbose=False to suppress YOLO output
+                self.model = YOLO(self.model_path, verbose=False)
+                print(f"✅ Model loaded successfully from {self.model_path}", file=sys.stderr)
             else:
-                print(f"❌ Model not found at {self.model_path}")
-                print("   Please train a model first or check the path")
+                print(f"❌ Model not found at {self.model_path}", file=sys.stderr)
+                print("   Please train a model first or check the path", file=sys.stderr)
                 self.model = None
         except Exception as e:
-            print(f"❌ Failed to load model: {e}")
+            print(f"❌ Failed to load model: {e}", file=sys.stderr)
             self.model = None
     
     def load_database(self):
@@ -67,12 +69,12 @@ class PalmRecognitionSystem:
             if os.path.exists(self.database_file):
                 with open(self.database_file, 'rb') as f:
                     self.palm_database = pickle.load(f)
-                print(f"✅ Loaded {len(self.palm_database)} palm signatures from database")
+                print(f"✅ Loaded {len(self.palm_database)} palm signatures from database", file=sys.stderr)
             else:
-                print("📝 Creating new palm database")
+                print("📝 Creating new palm database", file=sys.stderr)
                 self.palm_database = {}
         except Exception as e:
-            print(f"❌ Failed to load database: {e}")
+            print(f"❌ Failed to load database: {e}", file=sys.stderr)
             self.palm_database = {}
     
     def save_database(self):
@@ -80,9 +82,9 @@ class PalmRecognitionSystem:
         try:
             with open(self.database_file, 'wb') as f:
                 pickle.dump(self.palm_database, f)
-            print(f"💾 Saved {len(self.palm_database)} palm signatures to database")
+            print(f"💾 Saved {len(self.palm_database)} palm signatures to database", file=sys.stderr)
         except Exception as e:
-            print(f"❌ Failed to save database: {e}")
+            print(f"❌ Failed to save database: {e}", file=sys.stderr)
     
     def detect_hand_keypoints(self, image_path: str) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
@@ -95,28 +97,28 @@ class PalmRecognitionSystem:
             Tuple of (keypoints, confidences) or None if detection fails
         """
         if self.model is None:
-            print("❌ Model not loaded")
+            print("❌ Model not loaded", file=sys.stderr)
             return None
         
         try:
             # Load image
             image = cv2.imread(str(image_path))
             if image is None:
-                print(f"❌ Could not load image: {image_path}")
+                print(f"❌ Could not load image: {image_path}", file=sys.stderr)
                 return None
             
-            # Run inference
-            results = self.model(image)
+            # Run inference with verbose=False to suppress output
+            results = self.model(image, verbose=False)
             
             if len(results) == 0:
-                print("❌ No results returned")
+                print("❌ No results returned", file=sys.stderr)
                 return None
             
             result = results[0]
             
             # Check if keypoints were detected
             if result.keypoints is None or len(result.keypoints) == 0:
-                print("❌ No hand keypoints detected")
+                print("❌ No hand keypoints detected", file=sys.stderr)
                 return None
             
             keypoints = result.keypoints.xy[0].cpu().numpy()  # Shape: (21, 2)
@@ -127,14 +129,14 @@ class PalmRecognitionSystem:
             min_confidence = 0.5
             
             if min(knuckle_confidences) < min_confidence:
-                print(f"❌ Low confidence in knuckle detection (min: {min(knuckle_confidences):.3f})")
+                print(f"❌ Low confidence in knuckle detection (min: {min(knuckle_confidences):.3f})", file=sys.stderr)
                 return None
             
-            print(f"✅ Detected {len(keypoints)} keypoints with avg confidence: {np.mean(confidences):.3f}")
+            print(f"✅ Detected {len(keypoints)} keypoints with avg confidence: {np.mean(confidences):.3f}", file=sys.stderr)
             return keypoints, confidences
             
         except Exception as e:
-            print(f"❌ Keypoint detection failed: {e}")
+            print(f"❌ Keypoint detection failed: {e}", file=sys.stderr)
             return None
     
     def calculate_knuckle_distances(self, keypoints: np.ndarray) -> Dict[str, float]:
@@ -227,7 +229,7 @@ class PalmRecognitionSystem:
         Returns:
             Palm template dictionary or None if failed
         """
-        print(f"🔍 Creating palm template from: {image_path}")
+        print(f"🔍 Creating palm template from: {image_path}", file=sys.stderr)
         
         # Detect keypoints
         result = self.detect_hand_keypoints(image_path)
@@ -255,9 +257,9 @@ class PalmRecognitionSystem:
             'timestamp': str(Path(image_path).stat().st_mtime)
         }
         
-        print(f"✅ Created palm template with signature: {signature}")
-        print(f"   Raw distances: {len(raw_distances)} measurements")
-        print(f"   Normalized distances: {len(normalized_distances)} measurements")
+        print(f"✅ Created palm template with signature: {signature}", file=sys.stderr)
+        print(f"   Raw distances: {len(raw_distances)} measurements", file=sys.stderr)
+        print(f"   Normalized distances: {len(normalized_distances)} measurements", file=sys.stderr)
         
         return template
     
@@ -278,14 +280,14 @@ class PalmRecognitionSystem:
         
         # Check if signature already exists
         if template['signature'] in self.palm_database:
-            print(f"⚠️  Palm signature already exists for: {self.palm_database[template['signature']]['person_name']}")
+            print(f"⚠️  Palm signature already exists for: {self.palm_database[template['signature']]['person_name']}", file=sys.stderr)
             return False
         
         # Add to database
         self.palm_database[template['signature']] = template
         self.save_database()
         
-        print(f"✅ Registered palm for: {person_name}")
+        print(f"✅ Registered palm for: {person_name}", file=sys.stderr)
         return True
     
     def recognize_palm(self, image_path: str, threshold: float = 0.1) -> Optional[Dict]:
@@ -299,7 +301,7 @@ class PalmRecognitionSystem:
         Returns:
             Match information or None if no match found
         """
-        print(f"🔍 Recognizing palm from: {image_path}")
+        print(f"🔍 Recognizing palm from: {image_path}", file=sys.stderr)
         
         # Create template from input image
         template = self.create_palm_template(image_path)
@@ -323,9 +325,9 @@ class PalmRecognitionSystem:
         
         # Check if match is within threshold
         if best_match and best_distance <= threshold:
-            print(f"✅ Palm recognized as: {best_match['person_name']}")
-            print(f"   Match distance: {best_distance:.6f}")
-            print(f"   Threshold: {threshold}")
+            print(f"✅ Palm recognized as: {best_match['person_name']}", file=sys.stderr)
+            print(f"   Match distance: {best_distance:.6f}", file=sys.stderr)
+            print(f"   Threshold: {threshold}", file=sys.stderr)
             
             return {
                 'match': True,
@@ -335,9 +337,9 @@ class PalmRecognitionSystem:
                 'signature': best_match['signature']
             }
         else:
-            print(f"❌ No matching palm found")
-            print(f"   Best distance: {best_distance:.6f}")
-            print(f"   Threshold: {threshold}")
+            print(f"❌ No matching palm found", file=sys.stderr)
+            print(f"   Best distance: {best_distance:.6f}", file=sys.stderr)
+            print(f"   Threshold: {threshold}", file=sys.stderr)
             
             return {
                 'match': False,
@@ -447,7 +449,7 @@ class PalmRecognitionSystem:
         # Save if requested
         if save_path:
             cv2.imwrite(save_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
-            print(f"💾 Visualization saved to: {save_path}")
+            print(f"💾 Visualization saved to: {save_path}", file=sys.stderr)
         
         return vis_image
     

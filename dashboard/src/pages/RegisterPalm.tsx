@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, CameraOff, Download } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 // MediaPipe types
 declare global {
@@ -21,6 +22,7 @@ interface HandResults {
 
 const RegisterPalm: React.FC = () => {
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -37,13 +39,24 @@ const RegisterPalm: React.FC = () => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [isDone, setIsDone] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
   const isCountingDownRef = useRef(false);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
   const captureImageRef = useRef<(() => void) | null>(null);
   const isDoneRef = useRef(false);
+  const cooldownRef = useRef<NodeJS.Timeout | null>(null);
+  const isInCooldownRef = useRef(false);
 
   const tipIds = [4, 8, 12, 16, 20, 0]; // thumb -> pinky + palm
   const MATCH_FRACTION = 0.10;
+
+  // Check authentication
+  useEffect(() => {
+    if (!isAuthenticated) {
+      console.log('❌ User not authenticated, redirecting to sign up');
+      navigate('/signup');
+    }
+  }, [isAuthenticated, navigate]);
 
   // Sync refs with state
   useEffect(() => {
@@ -56,7 +69,7 @@ const RegisterPalm: React.FC = () => {
 
   // Start countdown when hand is properly positioned
   const startCountdown = useCallback(() => {
-    if (isCountingDownRef.current || isDoneRef.current) return; // already running or done
+    if (isCountingDownRef.current || isDoneRef.current || isInCooldownRef.current) return; // already running, done, or in cooldown
     
     console.log('⏰ Starting 2-second countdown...');
     setIsCountingDown(true);
@@ -98,6 +111,20 @@ const RegisterPalm: React.FC = () => {
       setCountdown(null);
       setStatus('📷 Camera ready - match the green outline');
       setStatusType('ready');
+      
+      // Start 3-second cooldown
+      console.log('⏳ Starting 3-second cooldown...');
+      isInCooldownRef.current = true;
+      setStatus('⏳ Please wait 3 seconds before trying again...');
+      setStatusType('default');
+      
+      cooldownRef.current = setTimeout(() => {
+        console.log('✅ Cooldown finished - ready for new countdown');
+        isInCooldownRef.current = false;
+        setStatus('📷 Camera ready - match the green outline');
+        setStatusType('ready');
+        cooldownRef.current = null;
+      }, 3000);
     }
   }, []);
 
@@ -140,8 +167,8 @@ const RegisterPalm: React.FC = () => {
           palmOutlineRef.current?.classList.add('good');
           cameraContainerRef.current?.classList.add('good');
           
-          // Start countdown if not already counting AND not done
-          if (!isCountingDownRef.current && !isDoneRef.current) {
+          // Start countdown if not already counting AND not done AND not in cooldown
+          if (!isCountingDownRef.current && !isDoneRef.current && !isInCooldownRef.current) {
             startCountdown();
           }
         } else {
@@ -422,10 +449,16 @@ const RegisterPalm: React.FC = () => {
     }
   }, []);
 
-  // Capture image
-  const captureImage = useCallback(() => {
+  // Capture image and register palm
+  const captureImage = useCallback(async () => {
     if (!stream || !videoRef.current) {
       setStatus('❌ Camera not started');
+      setStatusType('error');
+      return;
+    }
+
+    if (!isAuthenticated || !user) {
+      setStatus('❌ Not authenticated');
       setStatusType('error');
       return;
     }
@@ -443,27 +476,78 @@ const RegisterPalm: React.FC = () => {
     ctx.scale(-1, 1);
     ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
     
-    canvas.toBlob((blob) => {
+    canvas.toBlob(async (blob) => {
       if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `palm_${Date.now()}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        console.log('📸 Image captured, sending to backend...');
+        setStatus('🔄 Registering palm...');
+        setStatusType('default');
+        setIsRegistering(true);
         
-        setStatus('✅ Captured');
-        setStatusType('ready');
-        
-        // Set done state and stop processing
-        setIsDone(true);
-        stopCamera();
-        console.log('🎉 Image captured successfully - stopping video processing');
+        try {
+          // Create FormData for file upload
+          const formData = new FormData();
+          formData.append('image', blob, 'palm.jpg');
+          formData.append('phoneNumber', user.phoneNumber);
+          
+          console.log('🌐 Sending palm registration request...');
+          console.log('📱 User:', user.phoneNumber);
+          console.log('📊 Image size:', blob.size, 'bytes');
+          
+          const response = await fetch('/api/palm/register', {
+            method: 'POST',
+            body: formData
+          });
+          
+          const result = await response.json();
+          console.log('📋 Registration response:', result);
+          
+          if (result.success) {
+            setStatus('✅ Palm registered successfully!');
+            setStatusType('ready');
+            console.log('🎉 Palm registration successful!');
+            console.log('📝 Signature:', result.data?.signature);
+            console.log('📅 Registered at:', result.data?.registeredAt);
+            
+            // Set done state and stop processing
+            setIsDone(true);
+            stopCamera();
+            
+            // Navigate back to dashboard after a short delay
+            setTimeout(() => {
+              navigate('/dashboard');
+            }, 2000);
+          } else {
+            // Check if it's an "already registered" error
+            if (result.message && result.message.includes('already registered')) {
+              setStatus('ℹ️ Palm already registered for this account');
+              setStatusType('default');
+              console.log('ℹ️ Palm already registered');
+              
+              // Set done state and stop processing
+              setIsDone(true);
+              stopCamera();
+              
+              // Navigate back to dashboard after a short delay
+              setTimeout(() => {
+                navigate('/dashboard');
+              }, 1000);
+            } else {
+              setStatus(`❌ Registration failed: ${result.message}`);
+              setStatusType('error');
+              console.error('❌ Registration failed:', result);
+            }
+          }
+          
+        } catch (error) {
+          console.error('❌ Registration error:', error);
+          setStatus(`❌ Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          setStatusType('error');
+        } finally {
+          setIsRegistering(false);
+        }
       }
     }, 'image/jpeg', 0.9);
-  }, [stream]);
+  }, [stream, isAuthenticated, user, navigate]);
 
   // Set the ref for the capture function
   useEffect(() => {
@@ -586,6 +670,11 @@ const RegisterPalm: React.FC = () => {
         clearInterval(countdownRef.current);
         countdownRef.current = null;
       }
+      // Clean up cooldown timer
+      if (cooldownRef.current) {
+        clearTimeout(cooldownRef.current);
+        cooldownRef.current = null;
+      }
       stopCamera();
     };
   }, []); // Empty dependency array to run only on mount/unmount
@@ -616,7 +705,7 @@ const RegisterPalm: React.FC = () => {
   }, [isCameraActive]); // Only depend on isCameraActive
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4">
+    <div className="min-h-screen text-white p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -627,7 +716,7 @@ const RegisterPalm: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
             Back to Dashboard
           </button>
-          <h1 className="text-2xl font-bold">Register New Palm</h1>
+          {/* <h1 className="text-2xl font-bold">Register New Palm</h1> */}
         </div>
 
         {/* Camera Container */}
@@ -669,13 +758,14 @@ const RegisterPalm: React.FC = () => {
             )}
 
             {/* Hand Guide Overlay */}
-            <div className="absolute inset-0 pointer-events-none z-10">
-              <svg
-                ref={svgRef}
-                className="absolute inset-0 w-full h-full"
-                viewBox="0 0 316.8 430.41"
-                preserveAspectRatio="xMidYMid meet"
-              >
+            {!isDone && (
+              <div className="absolute inset-0 pointer-events-none z-10">
+                <svg
+                  ref={svgRef}
+                  className="absolute inset-0 w-full h-full"
+                  viewBox="0 0 316.8 430.41"
+                  preserveAspectRatio="xMidYMid meet"
+                >
                 <defs>
                   <filter id="glow">
                     <feGaussianBlur stdDeviation="2" result="b"/>
@@ -709,11 +799,12 @@ const RegisterPalm: React.FC = () => {
                     strokeWidth="3"
                     strokeDasharray="8 4"
                     filter="url(#glow)"
-                    d="m293.12 154.31c-1.187-0.007-2.4908 0.14375-3.9062 0.46875-1.654 0.381-5.9352 3.7758-7.1562 5.7188-5.857 9.331-3.3628 32.779-3.5938 47.281 0.39025 15.233 2.9204 30.087 0.71875 44.438-5.7953 18.424 6.6761 79.039-10.719 55.906-3.865-13.098-3.7128-26.528-6.4688-39.438-2.313-10.837-7.553-18.441-10.75-29.375-3.253-11.125-4.0165-23.033-6.4375-36.531-2.5845-11.757-4.192-30.66-16.469-30.094-4.235 0.313-11.087 7.5565-12.906 12.188-2.338 5.955-2.7642 15.3-2.1562 24.344 0.506 7.548 2.6182 16.95 5.0312 26.531 2.226 8.834 2.6592 18.112 4.2812 27.219 1.958 11.007 3.6798 24.304 6.4688 35.844 1.106 4.581 1.4818 10.123 2.8438 16.469 1.735 8.072 3.9748 15.122-4.2812 17.906-9.868-4.702-13.419-16.71-17.473-27.228-4.0209-6.8333-15.709-23.025-19.808-31.522-5.5156-10.571-9.433-34.282-20.062-34.406-10.618 0.127-13.053 15.803-10.75 29.375 2.9086 13.013 10.359 23.442 15.781 34.406 7.894 15.721 15.691 34.516 24.344 50.875-0.27973 24.311 3.3662 45.243 5.75 68.062 1.189 9.402 3.8988 21.991 5.7188 32.25 4.8748 20.737 11.765 41.04 16.623 61.234 1.8913 7.8614 7.4745 15.706 8.511 23.553 0.49491 3.747 0.86513 7.4946 1.0846 11.245 0.291 4.541 0.13202 26.932 0.64102 31.6 2.7381 0.60062 2.6746 0.73178 4.3902 0.77474 1.344-12.563-0.56775-32.846-0.71875-44.562-1.5202-7.0776-7.273-14.302-9.1449-21.59-7.3446-28.597-16.522-58.18-20.668-83.753-0.826-5.373-1.4532-9.7765-2.1562-17.188-1.7211-16.896-6.8855-33.727-5.3125-49.594l-1.0938-13.5c-0.0109 0.01-0.0204 0.0215-0.0312 0.0312-2.315-5.895-5.7368-11.104-8.5938-17.188-2.664-5.674-4.2822-12.188-7.1562-18.625-6.6482-6.9826-8.3089-16.538-12.188-23.656-7.3226-9.9401-13.434-26.327-12.188-37.25 0.613-4.46 2.1814-11.269 5-12.188 2.8402-0.50157 4.2424 0.49634 5.75 1.4375 4.059 5.17 5.495 11.468 7.875 17.906 2.651 7.18 5.8822 16.75 10.031 22.938 5.1781 6.8446 9.7482 13.941 14.263 20.594 4.324 6.734 6.7994 14.572 10.83 21.688 1.192 2.1023 3.0563 3.4189 4.1562 5.375 9.0863 2.9243 11.891 1.7205 16.625-5.4062 0.362-14.783-7.3795-31.402-9.3125-50.156-1.2274-10.367-3.1456-19.472-4.3125-27.938-0.20887-11.874-3.267-19.981-5-30.812-0.918-5.314-3.398-14.044-2.875-21.5 0.567-8.118 5.351-21.686 13.625-20.781 4.803 0.526 6.009 5.2872 7.1174 9.3514 3.599 14.671 4.8939 27.899 7.9139 41.524 2.8767 11.755 4.8374 20.948 8.5938 28.656 1.987 4.551 5.2518 11.769 6.4688 19.375 2.0606 12.892 2.1181 25.7 7.875 37.938 0.004 0.009-0.004 0.0226 0 0.0312h0.1875c6.0305 4.5999 10.519 3.3961 12.719-2.1562 4.759-16.692-2.0885-41.966 3.5625-60.188 2.2701-11.357-0.80138-43.253-1.4375-65.938-0.26546-9.4663-1.1262-18.122 3.5938-25.062 12.967-8.424 19.108 7.4128 20.781 19.344 1.974 14.08 0.81525 30.2 2.1562 46.562 0.339 4.108 1.6302 8.2215 2.1562 12.188 0.573 4.313 1.522 7.9995 2.125 12.188 2.9867 20.715-3.1271 42.028 0.6875 60 6.5388 24.952 23.743-22.153 26.562-29.906 5.219-12.997 11.593-26.931 16.469-39.406 1.469-3.844 2.6248-7.6298 3.5938-11.469 2.8923-12.511 8.8459-35.173 19.344-39.406 8.092-0.758 11.395 3.1538 10.031 16.469-1.543 14.897-7.9702 31.998-10.781 48-1.0999 10.395-4.4316 19.755-7.1562 29.375-4.198 12.434-13.396 28.433-15.062 43-1.1686 27.23 0.97779 54.387 8.4062 75.562 7.8574 4.3914 13.184-1.8571 18.125-6.4688 3.185-2.94 5.8708-6.4565 8.5938-9.3125 6.367-6.681 12.485-11.41 17.094-17.906 4.1315-8.2934 10.768-13.988 18.031-18.625 7.211-4.657 12.308-7.127 20.781-7.875 6.6039-1.8383 11.742 0.8728 18.625 2.125 1.872 1.525 3.3758 2.0725 3.5938 4.3125 0.5 5.127-4.7832 6.0317-10.031 9.0357-18.749 12.648-36.516 28.751-48.031 46.839-2.078 12.971-7.6342 22.472-15.031 30.125-1.521 2.229-9.1468 8.717-10.969 10-9.633 15.924-13.071 23.526-22 40.156-20.587 12.661-21.009 51.245-11.281 75.656 1.017 9.016 5.303 17.38 9.125 22.938 1.6772-"
+                    d="m293.12 154.31c-1.187-0.007-2.4908 0.14375-3.9062 0.46875-1.654 0.381-5.9352 3.7758-7.1562 5.7188-5.857 9.331-3.3628 32.779-3.5938 47.281 0.39025 15.233 2.9204 30.087 0.71875 44.438-5.7953 18.424 6.6761 79.039-10.719 55.906-3.865-13.098-3.7128-26.528-6.4688-39.438-2.313-10.837-7.553-18.441-10.75-29.375-3.253-11.125-4.0165-23.033-6.4375-36.531-2.5845-11.757-4.192-30.66-16.469-30.094-4.235 0.313-11.087 7.5565-12.906 12.188-2.338 5.955-2.7642 15.3-2.1562 24.344 0.506 7.548 2.6182 16.95 5.0312 26.531 2.226 8.834 2.6592 18.112 4.2812 27.219 1.958 11.007 3.6798 24.304 6.4688 35.844 1.106 4.581 1.4818 10.123 2.8438 16.469 1.735 8.072 3.9748 15.122-4.2812 17.906-9.868-4.702-13.419-16.71-17.473-27.228-4.0209-6.8333-15.709-23.025-19.808-31.522-5.5156-10.571-9.433-34.282-20.062-34.406-10.618 0.127-13.053 15.803-10.75 29.375 2.9086 13.013 10.359 23.442 15.781 34.406 7.894 15.721 15.691 34.516 24.344 50.875-0.27973 24.311 3.3662 45.243 5.75 68.062 1.189 9.402 3.8988 21.991 5.7188 32.25 4.8748 20.737 11.765 41.04 16.623 61.234 1.8913 7.8614 7.4745 15.706 8.511 23.553 0.49491 3.747 0.86513 7.4946 1.0846 11.245 0.291 4.541 0.13202 26.932 0.64102 31.6 2.7381 0.60062 2.6746 0.73178 4.3902 0.77474 1.344-12.563-0.56775-32.846-0.71875-44.562-1.5202-7.0776-7.273-14.302-9.1449-21.59-7.3446-28.597-16.522-58.18-20.668-83.753-0.826-5.373-1.4532-9.7765-2.1562-17.188-1.7211-16.896-6.8855-33.727-5.3125-49.594l-1.0938-13.5c-0.0109 0.01-0.0204 0.0215-0.0312 0.0312-2.315-5.895-5.7368-11.104-8.5938-17.188-2.664-5.674-4.2822-12.188-7.1562-18.625-6.6482-6.9826-8.3089-16.538-12.188-23.656-7.3226-9.9401-13.434-26.327-12.188-37.25 0.613-4.46 2.1814-11.269 5-12.188 2.8402-0.50157 4.2424 0.49634 5.75 1.4375 4.059 5.17 5.495 11.468 7.875 17.906 2.651 7.18 5.8822 16.75 10.031 22.938 5.1781 6.8446 9.7482 13.941 14.263 20.594 4.324 6.734 6.7994 14.572 10.83 21.688 1.192 2.1023 3.0563 3.4189 4.1562 5.375 9.0863 2.9243 11.891 1.7205 16.625-5.4062 0.362-14.783-7.3795-31.402-9.3125-50.156-1.2274-10.367-3.1456-19.472-4.3125-27.938-0.20887-11.874-3.267-19.981-5-30.812-0.918-5.314-3.398-14.044-2.875-21.5 0.567-8.118 5.351-21.686 13.625-20.781 4.803 0.526 6.009 5.2872 7.1174 9.3514 3.599 14.671 4.8939 27.899 7.9139 41.524 2.8767 11.755 4.8374 20.948 8.5938 28.656 1.987 4.551 5.2518 11.769 6.4688 19.375 2.0606 12.892 2.1181 25.7 7.875 37.938 0.004 0.009-0.004 0.0226 0 0.0312h0.1875c6.0305 4.5999 10.519 3.3961 12.719-2.1562 4.759-16.692-2.0885-41.966 3.5625-60.188 2.2701-11.357-0.80138-43.253-1.4375-65.938-0.26546-9.4663-1.1262-18.122 3.5938-25.062 12.967-8.424 19.108 7.4128 20.781 19.344 1.974 14.08 0.81525 30.2 2.1562 46.562 0.339 4.108 1.6302 8.2215 2.1562 12.188 0.573 4.313 1.522 7.9995 2.125 12.188 2.9867 20.715-3.1271 42.028 0.6875 60 6.5388 24.952 23.743-22.153 26.562-29.906 5.219-12.997 11.593-26.931 16.469-39.406 1.469-3.844 2.6248-7.6298 3.5938-11.469 2.8923-12.511 8.8459-35.173 19.344-39.406 8.092-0.758 11.395 3.1538 10.031 16.469-1.543 14.897-7.9702 31.998-10.781 48-1.0999 10.395-4.4316 19.755-7.1562 29.375-4.198 12.434-13.396 28.433-15.062 43-1.1686 27.23 0.97779 54.387 8.4062 75.562 7.8574 4.3914 13.184-1.8571 18.125-6.4688 3.185-2.94 5.8708-6.4565 8.5938-9.3125 6.367-6.681 12.485-11.41 17.094-17.906 4.1315-8.2934 10.768-13.988 18.031-18.625 7.211-4.657 12.308-7.127 20.781-7.875 6.6039-1.8383 11.742 0.8728 18.625 2.125 1.872 1.525 3.3758 2.0725 3.5938 4.3125 0.5 5.127-4.7832 6.0317-10.031 9.0357-18.749 12.648-36.516 28.751-48.031 46.839-2.078 12.971-7.6342 22.472-15.031 30.125-1.521 2.229-9.1468 8.717-10.969 10-9.633 15.924-13.071 23.526-22 40.156-20.587 12.661-21.009 51.245-11.281 75.656 1.017 9.016 5.303 17.38 9.125 22.938 1.6772-0.0166 1.6044-0.0816 4.0694-0.0893-1.1148-4.9983-8.0166-19.21-8.3819-25.004-1.901-18.222-10.225-38.084-2.125-55.607 2.536-5.095 9.184-10.12 12.875-15.031 6.5238-11.81 15.457-26.08 19.375-37.268 6.121-9.845 17.569-14.621 22.906-25.094 2.111-4.142 1.8648-9.0288 3.5938-13.594 4.3874-8.0897 11.818-18.59 17.906-25.094 13.8-12.226 29.902-23.148 43-33.656-0.514-12.861-12.463-14.285-24.344-15.781-11.793 0.95887-19.991 4.576-29.375 10.75-8.335 5.464-11.206 11.972-17.219 20.062-7.361 9.904-18.129 17.421-26.626 27.299-3.201 0.381-3.2397 1.2434-7.5447 0.52237-5.6205-23.837-7.8823-36.767-8.1102-62.508 0.34-3.3119 0.7615-8.9524 1.0848-12.174 9.9765-24.711 16.995-41.713 21.134-65.201 6.8033-16.252 21.594-67.025 0.71875-70.938-10.983-0.51417-18.276 11.075-22.219 19.344-5.169 11.194-5.5672 25.369-10.031 37.25-1.171 3.119-3.0938 5.3818-4.4688 8.5938-4.5822 9.475-26.072 67.599-29.406 61.25-4.918-11.713 0.79082-37.304-0.53125-55.5-0.407-5.603-2.0008-11.55-2.8438-17.219-3.141-21.142-3.6445-67.742-6.935-71.705-3.2438-5.1039-7.3808-13.963-15.69-14.014z"
                   />
                 </g>
               </svg>
-            </div>
+              </div>
+            )}
           </div>
 
            {/* Status */}
@@ -726,12 +817,13 @@ const RegisterPalm: React.FC = () => {
            </div>
 
            {/* Debug Info */}
-           <div className="mt-2 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
+           {/* <div className="mt-2 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
              <div>Debug: Camera Active: {isCameraActive ? '✅' : '❌'} | Stream: {stream ? '✅' : '❌'} | Hands: {handsRef.current ? '✅' : '❌'} | RAF: {rafRef.current ? '✅' : '❌'}</div>
              <div>Video: {videoRef.current ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : 'Not loaded'}</div>
              <div>MediaPipe: {typeof window !== 'undefined' && window.Hands ? '✅ Available' : '❌ Not loaded'}</div>
-             <div>Countdown: {isCountingDown ? `⏰ ${countdown}s` : '❌'} | Outline: {palmOutlineRef.current?.classList.contains('good') ? '✨ Glowing' : '❌'} | Done: {isDone ? '✅' : '❌'}</div>
-           </div>
+             <div>Countdown: {isCountingDown ? `⏰ ${countdown}s` : '❌'} | Outline: {palmOutlineRef.current?.classList.contains('good') ? '✨ Glowing' : '❌'} | Done: {isDone ? '✅' : '❌'} | Cooldown: {isInCooldownRef.current ? '⏳' : '❌'}</div>
+             <div>Auth: {isAuthenticated ? '✅' : '❌'} | User: {user?.phoneNumber || 'None'} | Registering: {isRegistering ? '🔄' : '❌'}</div>
+           </div> */}
 
           {/* Controls */}
           <div className="flex gap-3 justify-center mt-4">
@@ -749,11 +841,11 @@ const RegisterPalm: React.FC = () => {
             
             <button
               onClick={captureImage}
-              disabled={!isCameraActive}
+              disabled={!isCameraActive || isRegistering}
               className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
             >
               <Download className="w-4 h-4" />
-              Capture
+              {isRegistering ? 'Registering...' : 'Register Palm'}
             </button>
             
             <button
@@ -778,7 +870,13 @@ const RegisterPalm: React.FC = () => {
                     clearInterval(countdownRef.current);
                     countdownRef.current = null;
                   }
+                  // Clear any existing cooldown
+                  if (cooldownRef.current) {
+                    clearTimeout(cooldownRef.current);
+                    cooldownRef.current = null;
+                  }
                   isCountingDownRef.current = false;
+                  isInCooldownRef.current = false;
                   setIsCountingDown(false);
                   setCountdown(null);
                 }}
@@ -794,7 +892,7 @@ const RegisterPalm: React.FC = () => {
         {/* Hidden canvas for image capture */}
         <canvas ref={canvasRef} className="hidden" />
 
-         {/* Instructions */}
+         {/* Instructions
          <div className="mt-8 p-6 bg-gray-800 rounded-lg">
            <h3 className="text-lg font-semibold mb-3">Instructions:</h3>
            <ol className="list-decimal list-inside space-y-2 text-gray-300">
@@ -802,21 +900,22 @@ const RegisterPalm: React.FC = () => {
              <li>Wait for the outline to turn cyan (glowing) - this means your hand is properly positioned</li>
              <li>When positioned correctly, a 2-second countdown will start automatically</li>
              <li>The background will darken and show a countdown timer</li>
-             <li>The image will be captured automatically when the countdown reaches 0</li>
-             <li>The captured image will be downloaded to your device</li>
+             <li>Your palm will be captured and registered automatically when the countdown reaches 0</li>
+             <li>Upon successful registration, you'll be redirected back to the dashboard</li>
            </ol>
            
            <div className="mt-4 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
-             <h4 className="text-green-400 font-semibold mb-2">Auto-Capture Features:</h4>
+             <h4 className="text-green-400 font-semibold mb-2">Auto-Capture & Registration:</h4>
              <ul className="text-green-300 text-sm space-y-1">
                <li>• Hand detection triggers automatic countdown</li>
                <li>• 2-second timer gives you time to position perfectly</li>
                <li>• Background darkens during countdown for better focus</li>
                <li>• Countdown stops if you move your hand away</li>
-               <li>• Manual "Capture" button still available as backup</li>
+               <li>• Palm is automatically registered to your phone number</li>
+               <li>• Manual "Register Palm" button available as backup</li>
              </ul>
            </div>
-         </div>
+         </div> */}
       </div>
 
        <style>{`

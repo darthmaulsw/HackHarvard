@@ -31,64 +31,62 @@ const Dashboard: React.FC = () => {
           </div>
           <button
             onClick={handleLogout}
-            className="btn btn-secondary"
+            className="btn btn- text-white"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-4 h-4 text-white" />
             Logout
           </button>
         </div>
 
-        {/* User Info Card */}
-        <div className="card p-6 mb-8">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-              <User className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-white">Account Information</h2>
-              <p className="text-white/70">Your verified account details</p>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
-              <Phone className="w-5 h-5 text-white/70" />
-              <div>
-                <p className="text-white/70 text-sm">Phone Number</p>
-                <p className="text-white font-medium">
-                  {user?.phoneNumber ? 
-                    `(${user.phoneNumber.slice(0, 3)}) ${user.phoneNumber.slice(3, 6)}-${user.phoneNumber.slice(6)}` :
-                    'Not available'
-                  }
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
-              <Shield className="w-5 h-5 text-green-400" />
-              <div>
-                <p className="text-white/70 text-sm">Verification Status</p>
-                <p className="text-green-400 font-medium">Verified</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
-              <Calendar className="w-5 h-5 text-white/70" />
-              <div>
-                <p className="text-white/70 text-sm">Member Since</p>
-                <p className="text-white font-medium">
-                  {user?.createdAt ? 
-                    new Date(user.createdAt).toLocaleDateString() :
-                    'Not available'
-                  }
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Personal Information Section */}
+          <div className="card p-6">
+            <h3 className="text-xl font-semibold text-white mb-4">
+              Personal Information
+            </h3>
+            <p className="text-white/70 mb-6">
+              Your verified account details and personal information.
+            </p>
+            
+            <div className="grid grid-cols-1 gap-4">
+              <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                <Phone className="w-5 h-5 text-white/70" />
+                <div>
+                  <p className="text-white/70 text-sm">Phone Number</p>
+                  <p className="text-white font-medium">
+                    {user?.phoneNumber ? 
+                      `(${user.phoneNumber.slice(0, 3)}) ${user.phoneNumber.slice(3, 6)}-${user.phoneNumber.slice(6)}` :
+                      'Not available'
+                    }
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                <Shield className="w-5 h-5 text-green-400" />
+                <div>
+                  <p className="text-white/70 text-sm">Verification Status</p>
+                  <p className="text-green-400 font-medium">Verified</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                <Calendar className="w-5 h-5 text-white/70" />
+                <div>
+                  <p className="text-white/70 text-sm">Member Since</p>
+                  <p className="text-white font-medium">
+                    {user?.createdAt ? 
+                      new Date(user.createdAt).toLocaleDateString() :
+                      'Not available'
+                    }
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Palm Recognition Section */}
           <div className="card p-6">
             <h3 className="text-xl font-semibold text-white mb-4">
@@ -101,41 +99,16 @@ const Dashboard: React.FC = () => {
             <div className="space-y-4">
               <button 
                 onClick={handleRegisterPalm}
-                className="btn btn-primary w-full flex items-center justify-center gap-2"
+                className="btn btn-primary w-full flex items-center justify-center gap-2 py-4 text-lg"
               >
-                <Hand className="w-4 h-4" />
+                <Hand className="w-5 h-5" />
                 Register New Palm
               </button>
-              <button className="btn btn-secondary w-full">
+              <button className="btn btn-secondary w-full py-4 text-lg">
                 View Registered Palms
               </button>
-              <button className="btn btn-secondary w-full">
+              <button className="btn btn-secondary w-full py-4 text-lg">
                 Recognition History
-              </button>
-              <div className="pt-4 border-t border-white/20">
-                <OTPDialogDemo />
-              </div>
-            </div>
-          </div>
-
-          {/* Security Section */}
-          <div className="card p-6">
-            <h3 className="text-xl font-semibold text-white mb-4">
-              Security & Privacy
-            </h3>
-            <p className="text-white/70 mb-6">
-              Manage your account security and privacy settings.
-            </p>
-            
-            <div className="space-y-4">
-              <button className="btn btn-secondary w-full">
-                Change Phone Number
-              </button>
-              <button className="btn btn-secondary w-full">
-                Privacy Settings
-              </button>
-              <button className="btn btn-secondary w-full">
-                Data Export
               </button>
             </div>
           </div>
